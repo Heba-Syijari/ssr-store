@@ -32,19 +32,86 @@ async function applyDemoOptions({ simulateFailure, delayMs }: FetchDemoOptions =
   }
 }
 
+/** How long a single upstream attempt may take before it is abandoned. */
+const REQUEST_TIMEOUT_MS = 8_000;
+
+/** Total attempts per request, including the first one. */
+const MAX_ATTEMPTS = 3;
+
+const DEFAULT_HEADERS: Record<string, string> = {
+  Accept: "application/json",
+  // FakeStoreAPI sits behind Cloudflare, which is noticeably less friendly to
+  // requests coming from datacenter IPs (a serverless function on Vercel, for
+  // example) when they carry the runtime's default user agent. Identifying the
+  // app honestly is enough to be treated like a normal client.
+  "User-Agent": "Mozilla/5.0 (compatible; ssr-store/1.0; +https://github.com/)",
+};
+
+function describeCause(cause: unknown): string {
+  if (cause instanceof Error) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    const inner = cause.cause instanceof Error ? ` <- ${cause.cause.message}` : "";
+
+    return `${cause.name}: ${cause.message}${code ? ` (${code})` : ""}${inner}`;
+  }
+
+  return String(cause);
+}
+
+/**
+ * Single entry point for every upstream call: default headers, a per-attempt
+ * timeout, a short retry for transient failures, and one normalised error type.
+ *
+ * Retrying matters here because the upstream is a free, shared, Cloudflare
+ * fronted API: a 429 or a 5xx usually means "ask again in a moment", not
+ * "this product does not exist".
+ */
 async function apiFetch(path: string, init: RequestInit): Promise<Response> {
   const url = `${API_BASE_URL}${path}`;
 
-  try {
-    return await fetch(url, {
-      ...init,
-      headers: { Accept: "application/json", ...init.headers },
-    });
-  } catch (cause) {
-    // A DNS/TLS/timeout problem never produces a Response, so it is normalised here
-    // into the same ApiError shape the rest of the app (and error.tsx) understands.
-    throw new ApiError(`Network request to ${url} failed.`, undefined, { cause });
+  // A timeout is only attached to uncached requests. `AbortSignal` and the Data
+  // Cache do not mix: a per-request signal on a fetch that is meant to be
+  // reused would tie the cached entry to one request's lifetime.
+  const isCacheable = Boolean(init.next && "revalidate" in init.next);
+
+  let lastError: ApiError = new ApiError(`Request to ${url} was never attempted.`);
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        headers: { ...DEFAULT_HEADERS, ...init.headers },
+        signal: isCacheable ? undefined : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+
+      if (response.status === 429 || response.status >= 500) {
+        lastError = new ApiError(
+          `FakeStoreAPI responded with ${response.status} ${response.statusText}.`,
+          response.status,
+        );
+      } else {
+        return response;
+      }
+    } catch (cause) {
+      // A DNS/TLS/timeout problem never produces a Response, so it is normalised
+      // here into the same ApiError the rest of the app (and error.tsx) expects.
+      lastError = new ApiError(
+        `Network request to ${url} failed — ${describeCause(cause)}`,
+        undefined,
+        { cause },
+      );
+    }
+
+    if (attempt < MAX_ATTEMPTS) {
+      await sleep(attempt * 300);
+    }
   }
+
+  // Ends up in the Vercel runtime logs, where the digest shown to the user can
+  // be matched to the actual reason.
+  console.error(`[api] ${url} failed after ${MAX_ATTEMPTS} attempts:`, lastError.message);
+
+  throw lastError;
 }
 
 /**
