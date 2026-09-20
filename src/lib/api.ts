@@ -48,12 +48,17 @@ async function apiFetch(path: string, init: RequestInit): Promise<Response> {
 }
 
 /**
- * Reads the full catalogue for the list page.
+ * Reads the full catalogue.
+ *
+ * CACHING DECISION (the one explicit decision required by the task):
+ * `cache: "no-store"` — the list page must reflect the catalogue *at request time*,
+ * so the fetch opts out of the Data Cache entirely and the route renders dynamically.
+ * See README.md § "Caching decision" for the full rationale.
  */
 export async function getAllProducts(options?: FetchDemoOptions): Promise<Product[]> {
   await applyDemoOptions(options);
 
-  const response = await apiFetch("/products", { cache: "force-cache" });
+  const response = await apiFetch("/products", { cache: "no-store" });
 
   if (!response.ok) {
     throw new ApiError(
