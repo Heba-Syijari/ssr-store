@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
 import { logoutAction } from "@/app/login/actions";
-import { DataSourceNotice } from "@/components/data-source-notice";
 import { getCatalogue } from "@/lib/api";
 import { requireSession } from "@/lib/auth";
 import { formatCategory, formatPrice } from "@/lib/format";
@@ -32,7 +31,7 @@ export default async function AdminPage() {
   // page must never depend on something outside it having done the check.
   const session = await requireSession("/admin");
 
-  const { items: products, source } = await getCatalogue();
+  const { items: products } = await getCatalogue();
   const categories = [...new Set(products.map((product) => product.category))];
   const averagePrice =
     products.reduce((total, product) => total + product.price, 0) / (products.length || 1);
@@ -42,8 +41,6 @@ export default async function AdminPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <DataSourceNotice source={source} />
-
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl font-bold tracking-tight">Catalogue overview</h1>

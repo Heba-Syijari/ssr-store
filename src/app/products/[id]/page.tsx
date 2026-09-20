@@ -3,7 +3,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { DataSourceNotice } from "@/components/data-source-notice";
 import { getProduct } from "@/lib/api";
 import { formatCategory, formatPrice } from "@/lib/format";
 
@@ -42,7 +41,7 @@ export async function generateMetadata({ params }: { params: RouteParams }): Pro
 
 export default async function ProductDetailPage({ params }: { params: RouteParams }) {
   const { id } = await params;
-  const { product, source } = await getProduct(id);
+  const { product } = await getProduct(id);
 
   if (!product) {
     // Handled entirely on the server: rendering of this segment stops here and
@@ -59,8 +58,6 @@ export default async function ProductDetailPage({ params }: { params: RouteParam
 
   return (
     <article className="flex flex-col gap-8">
-      <DataSourceNotice source={source} />
-
       <nav aria-label="Breadcrumb" className="text-sm text-slate-500 dark:text-slate-400">
         <Link className="transition hover:text-slate-900 dark:hover:text-slate-100" href="/products">
           Products

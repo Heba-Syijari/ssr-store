@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { DataSourceNotice } from "@/components/data-source-notice";
 import { Pagination } from "@/components/pagination";
 import { ProductCard } from "@/components/product-card";
 import { getProductPage, parsePageParam } from "@/lib/api";
@@ -35,7 +34,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Sea
   const simulateFailure = params.fail === "1";
   const delayMs = params.slow === "1" ? 2500 : 0;
 
-  const { items, page, totalPages, totalItems, pageSize, source } = await getProductPage(
+  const { items, page, totalPages, totalItems, pageSize } = await getProductPage(
     parsePageParam(params.page),
     { simulateFailure, delayMs },
   );
@@ -49,8 +48,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Sea
 
   return (
     <div className="flex flex-col gap-8">
-      <DataSourceNotice source={source} />
-
       <header className="flex flex-col gap-2">
         <h1 className="text-3xl font-bold tracking-tight">Products</h1>
         <p className="text-sm text-slate-600 dark:text-slate-400">

@@ -39,12 +39,15 @@ it — Cloudflare is deciding on IP reputation, not on what we send.
 
 **What the app does about it:** `getCatalogue()` tries the live API first and, only if it cannot be
 read, falls back to `src/lib/catalogue-snapshot.ts` — a verbatim copy of `GET /products` with the
-same ids, fields and image URLs — and renders a banner saying so. Degrading visibly beats degrading
-quietly: the page keeps working and nobody is misled about how fresh the data is.
+same ids, fields and image URLs — so the deployed link keeps working instead of showing an error
+page. The fallback is not silent where it matters: every use is logged server-side
+(`[api] falling back to the bundled catalogue snapshot: …`) and `/api/health` reports the live
+upstream status on demand.
 
 Everything else is unchanged by this: the route is still rendered per request, pagination still
 runs on the server, `?fail=1` still demonstrates the error boundary, and unknown ids still resolve
-to the custom 404. Product images keep loading from `fakestoreapi.com` because static assets are
+to the custom 404. The snapshot is a deployment workaround for one blocked upstream, not a second
+data source: remove the `catch` in `getCatalogue()` and the app is purely live again. Product images keep loading from `fakestoreapi.com` because static assets are
 served from Cloudflare's edge cache and never hit the challenge.
 
 **To see it reading live data, run it locally** (`npm run dev`) — same code, no banner, and
