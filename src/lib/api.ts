@@ -1,4 +1,5 @@
-import type { FetchDemoOptions, Product, ProductPage } from "@/lib/types";
+import { CATALOGUE_SNAPSHOT } from "@/lib/catalogue-snapshot";
+import type { DataSource, FetchDemoOptions, Product, ProductPage } from "@/lib/types";
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "https://fakestoreapi.com";
 
@@ -40,11 +41,11 @@ const MAX_ATTEMPTS = 3;
 
 const DEFAULT_HEADERS: Record<string, string> = {
   Accept: "application/json",
-  // FakeStoreAPI sits behind Cloudflare, which is noticeably less friendly to
-  // requests coming from datacenter IPs (a serverless function on Vercel, for
-  // example) when they carry the runtime's default user agent. Identifying the
-  // app honestly is enough to be treated like a normal client.
-  "User-Agent": "Mozilla/5.0 (compatible; ssr-store/1.0; +https://github.com/)",
+  // Identifies the caller instead of leaving the runtime's default user agent.
+  // Measured, not assumed: it does not get past the Cloudflare challenge that
+  // this API returns to datacenter IPs — see README.md § "Deployment note" —
+  // it is simply the polite thing to send.
+  "User-Agent": "ssr-store/1.0 (+https://ssr-store-eight.vercel.app)",
 };
 
 function describeCause(cause: unknown): string {
@@ -115,7 +116,7 @@ async function apiFetch(path: string, init: RequestInit): Promise<Response> {
 }
 
 /**
- * Reads the full catalogue.
+ * Reads the full catalogue from the API. Throws if the upstream cannot be read.
  *
  * CACHING DECISION (the one explicit decision required by the task):
  * `cache: "no-store"` — the list page must reflect the catalogue *at request time*,
@@ -144,6 +145,35 @@ export async function getAllProducts(options?: FetchDemoOptions): Promise<Produc
 }
 
 /**
+ * The catalogue, with a name for where it came from.
+ *
+ * FakeStoreAPI sits behind Cloudflare, which answers requests from datacenter
+ * IP ranges — every serverless platform, this deployment included — with a
+ * "Just a moment..." challenge instead of JSON. Rather than show a broken page
+ * to anyone opening the deployed link, the read falls back to the committed
+ * snapshot of the same catalogue and *says so in the UI*.
+ *
+ * Locally, and anywhere the API is reachable, `source` is always "live".
+ * A simulated failure (?fail=1) is deliberately not caught here: that switch
+ * exists to demonstrate the error boundary.
+ */
+export async function getCatalogue(
+  options?: FetchDemoOptions,
+): Promise<{ items: Product[]; source: DataSource }> {
+  try {
+    return { items: await getAllProducts(options), source: "live" };
+  } catch (error) {
+    if (options?.simulateFailure || !(error instanceof ApiError)) {
+      throw error;
+    }
+
+    console.error("[api] falling back to the bundled catalogue snapshot:", error.message);
+
+    return { items: CATALOGUE_SNAPSHOT, source: "snapshot" };
+  }
+}
+
+/**
  * FakeStoreAPI has no offset/page parameter (only `?limit=`), so pagination is
  * computed on the server after the catalogue is read. The browser never sees
  * the items it is not supposed to render.
@@ -152,7 +182,7 @@ export async function getProductPage(
   requestedPage: number,
   options?: FetchDemoOptions,
 ): Promise<ProductPage> {
-  const products = await getAllProducts(options);
+  const { items: products, source } = await getCatalogue(options);
 
   const totalItems = products.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
@@ -165,6 +195,7 @@ export async function getProductPage(
     pageSize: PAGE_SIZE,
     totalItems,
     totalPages,
+    source,
   };
 }
 
@@ -216,6 +247,28 @@ export async function getProductById(id: string): Promise<Product | null> {
   }
 
   return parsed as Product;
+}
+
+/**
+ * A single product, with a name for where it came from — the detail-page
+ * counterpart of `getCatalogue`. "Not found" stays `null` either way, so
+ * `notFound()` behaves the same whether the data is live or from the snapshot.
+ */
+export async function getProduct(id: string): Promise<{ product: Product | null; source: DataSource }> {
+  try {
+    return { product: await getProductById(id), source: "live" };
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      throw error;
+    }
+
+    console.error("[api] falling back to the bundled catalogue snapshot:", error.message);
+
+    return {
+      product: CATALOGUE_SNAPSHOT.find((product) => String(product.id) === id) ?? null,
+      source: "snapshot",
+    };
+  }
 }
 
 /** Normalises the `?page=` query param into a usable 1-based page number. */

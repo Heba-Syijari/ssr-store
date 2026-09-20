@@ -18,6 +18,13 @@ export interface Product {
   rating: ProductRating;
 }
 
+/**
+ * Where the rendered data actually came from. "snapshot" means the live API
+ * could not be reached from the server and the committed copy was used instead;
+ * the UI never hides that from the user.
+ */
+export type DataSource = "live" | "snapshot";
+
 /** Result of a server-side paginated read of the product list. */
 export interface ProductPage {
   items: Product[];
@@ -25,6 +32,7 @@ export interface ProductPage {
   pageSize: number;
   totalItems: number;
   totalPages: number;
+  source: DataSource;
 }
 
 /** Options used by the demo switches (`?fail=1`, `?slow=1`) on /products. */
