@@ -16,6 +16,40 @@ Three pages, as specified:
 
 ---
 
+## Deployment note: the live API blocks datacenter IPs
+
+**If the deployed link shows an amber banner, this is why.** FakeStoreAPI sits behind Cloudflare,
+which answers requests coming from datacenter IP ranges — which is exactly what a serverless
+function is — with a `403` "Just a moment..." challenge page instead of JSON. The same call from a
+normal connection returns `200`.
+
+This was measured, not assumed. `/api/health` runs the same request from the deployed server and
+reports what came back:
+
+| What was tried | Result |
+| --- | --- |
+| Default headers, region `iad1` | `403`, `text/html`, `server: cloudflare` |
+| Full browser header set (UA, `sec-ch-ua`, `Referer`, …) | `403` |
+| No custom headers at all | `403` |
+| Region moved to `fra1` | `403` |
+| Any other host (`dummyjson.com`) from the same function | `200` in 31 ms |
+
+So outbound networking is fine; this one upstream refuses this class of client. Headers cannot fix
+it — Cloudflare is deciding on IP reputation, not on what we send.
+
+**What the app does about it:** `getCatalogue()` tries the live API first and, only if it cannot be
+read, falls back to `src/lib/catalogue-snapshot.ts` — a verbatim copy of `GET /products` with the
+same ids, fields and image URLs — and renders a banner saying so. Degrading visibly beats degrading
+quietly: the page keeps working and nobody is misled about how fresh the data is.
+
+Everything else is unchanged by this: the route is still rendered per request, pagination still
+runs on the server, `?fail=1` still demonstrates the error boundary, and unknown ids still resolve
+to the custom 404. Product images keep loading from `fakestoreapi.com` because static assets are
+served from Cloudflare's edge cache and never hit the challenge.
+
+**To see it reading live data, run it locally** (`npm run dev`) — same code, no banner, and
+`/api/health` reports `"ok": true`.
+
 ## Stack
 
 - **Next.js 16.3.5** (App Router) — the task asks for 14 or newer
@@ -203,6 +237,7 @@ src/
   components/               presentational, all Server Components
   lib/
     api.ts                  every upstream call lives here
+    catalogue-snapshot.ts   offline copy, used only when the API is unreachable
     session.ts              runtime-agnostic sign/verify
     auth.ts                 cookie + guard helpers (server only)
   proxy.ts                  route protection before render
@@ -228,7 +263,12 @@ response headers are gone before your `notFound()` runs, so "just return 404" is
 decide inside the page. Working that out (and confirming it against the framework's own docs rather
 than guessing) took longer than building the three pages.
 
-Second place: making session verification work identically in the proxy and in a Server Component.
+Runner-up: the deployment discovering that the mandated API refuses serverless callers. The
+temptation was to keep guessing (another user agent, another region) — turning it into a
+measurement instead, with `/api/health`, is what produced the table above and made the decision to
+fall back a deliberate one rather than a shrug.
+
+Third: making session verification work identically in the proxy and in a Server Component.
 The proxy runs in a stripped-down runtime, so the usual `crypto`/`Buffer` reflexes do not apply —
 hence the Web Crypto-only implementation in `src/lib/session.ts`.
 
